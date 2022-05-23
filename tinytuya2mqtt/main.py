@@ -25,7 +25,7 @@ if os.environ.get('TINYTUYA_DEBUG'):
     tinytuya.set_debug()
 
 
-MQTT_BROKER = 'ringil'
+MQTT_BROKER = 'mqtt_broker'  # Hostname set in docker-compose.yml
 TIME_SLEEP = 5
 
 

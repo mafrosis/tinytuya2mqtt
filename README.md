@@ -20,12 +20,32 @@ Once this is setup, your devices will just appear, and will be controllable from
                                └───────┘    └───────┘
 ```
 
-Install
+Running
+----------
+
+Ensure `tinytuya2mqtt.ini` and `snapshot.json` are in the current directory. Ensure your broker IP
+has been set in `docker-compose.yml`:
+
+```
+docker compose up
+```
+
+Or, without `docker`:
+```
+tinytuya2mqtt
+```
+
+Setup
 ----------
 
 ```
+docker compose build
+```
+
+Or, without `docker`:
+```
 python3 -m venv venv && source venv/bin/activate
-pip install .
+pip install -e .
 ```
 
 Config

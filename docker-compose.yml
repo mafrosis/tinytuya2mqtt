@@ -1,0 +1,13 @@
+---
+version: '3'
+
+services:
+  tinytuya2mqtt:
+    image: mafrosis/tinytuya2mqtt
+    build:
+      context: .
+    extra_hosts:
+      mqtt_broker: 192.168.1.198
+    volumes:
+      - ./snapshot.json:/snapshot.json:ro
+      - ./tinytuya2mqtt.ini:/tinytuya2mqtt.ini:ro
