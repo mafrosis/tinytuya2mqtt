@@ -3,4 +3,5 @@ __pycache__
 *.egg-info
 venv
 
-devices.json
+snapshot.json
+tinytuya2mqtt.ini

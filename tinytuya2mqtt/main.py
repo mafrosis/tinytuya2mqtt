@@ -1,9 +1,12 @@
+import configparser
 import dataclasses
 import json
 import logging
 import os
+import sys
 import threading
 import time
+from typing import List
 
 from paho.mqtt import publish
 import paho.mqtt.client as mqtt
@@ -33,7 +36,7 @@ class Device:
     key: str
     mac: str
     ip: str
-    dps: dict
+    dps: dict = dataclasses.field(default=None)
     tuya: tinytuya.OutletDevice = dataclasses.field(default=None)
 
 
@@ -90,25 +93,55 @@ def autoconfigure_ha_fan(device: Device):
     logger.info('Autodiscovery topic published for %s at %s', device.name, device.id)
 
 
+def read_config() -> List[Device]:
+    '''
+    Read & parse tinytuya2mqtt.ini and snapshot.json
+    '''
+    # Validate files are present
+    for fn in ('snapshot.json', 'tinytuya2mqtt.ini'):
+        if not os.path.exists(fn):
+            logger.error('Missing %s', fn)
+            sys.exit(2)
+
+    try:
+        # Read snapshop.json
+        with open('snapshot.json', encoding='utf8') as f:
+            snapshot = json.load(f)
+    except json.decoder.JSONDecodeError:
+        logger.error('Invalid snapshot.json!')
+        sys.exit(3)
+
+    # Create a dict of Device objects from snapshot.json
+    devices = {
+        d['id']: Device(d['name'], d['id'], d['key'], d['mac'], d['ip'])
+        for d in snapshot['devices']
+    }
+
+    # Read tinytuya2mqtt.ini
+    cfg = configparser.ConfigParser(inline_comment_prefixes='#')
+
+    with open('tinytuya2mqtt.ini', encoding='utf8') as f:
+        cfg.read_string(f.read())
+
+    try:
+        # Map the device pin configurations into the Device class
+        for section in cfg.sections():
+            parts = section.split(' ')
+            device_id = parts[1]
+            devices[device_id].dps = dict(cfg.items(section))
+
+    except IndexError:
+        logger.error('Malformed section name in tinytuya2mqtt.ini')
+        sys.exit(3)
+
+    return devices.values()
+
+
 def main():
     '''
-    Read the device.json configuration file and start the app
+    Read config and start the app
     '''
-    devices = []
-
-    with open('devices.json', encoding='utf8') as f:
-        for device in json.load(f):
-            device = Device(
-                name=device['name'],
-                id=device['id'],
-                key=device['key'],
-                mac=device['mac'],
-                ip=device['ip'],
-                dps=device['dps'],
-            )
-            devices.append(device)
-
-    for device in devices:
+    for device in read_config():
         autoconfigure_ha_fan(device)
 
         # Starting polling this device on a thread
