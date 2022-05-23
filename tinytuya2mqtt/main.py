@@ -221,6 +221,7 @@ def poll(device: Device):
 
     device.tuya = tinytuya.OutletDevice(device.id, device.ip, device.key)
     device.tuya.set_version(3.3)
+    device.tuya.set_socketPersistent(True)
 
     # Connect to the broker and hookup the MQTT message event handler
     client = mqtt.Client(device.id, userdata={'device': device})
