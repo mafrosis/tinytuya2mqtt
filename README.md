@@ -4,6 +4,21 @@ tinytuya2mqtt
 A bridge between [jasonacox/tinytuya](https://github.com/jasonacox/tinytuya) and Home Assistant via
 MQTT.
 
+Leveraging Home Assistant's autodiscovery means there is no configuration required on the HA side.
+Once this is setup, your devices will just appear, and will be controllable from HA.
+
+```
+┌───────────┐      ┌──────┐      ┌───────────────┐
+│ Home      │      │ MQTT │      │ tinytuya2mqtt │
+│ Assistant │◀────▶│      │◀────▶│               │
+└───────────┘      └──────┘      └──┬────────┬───┘
+                                   ┌┘        └──┐
+                                   ▼            ▼
+                               ┌───────┐    ┌───────┐
+                               │ Tuya  │    │ Tuya  │
+                               │ Fan   │    │ Light │
+                               └───────┘    └───────┘
+```
 
 Install
 ----------
