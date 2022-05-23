@@ -98,14 +98,29 @@ def read_config() -> List[Device]:
     Read & parse tinytuya2mqtt.ini and snapshot.json
     '''
     # Validate files are present
-    for fn in ('snapshot.json', 'tinytuya2mqtt.ini'):
-        if not os.path.exists(fn):
-            logger.error('Missing %s', fn)
-            sys.exit(2)
+    snapshot_conf_path = tinytuya2mqtt_conf_path = None
+
+    for fn in ('snapshot.json', '/snapshot.json'):
+        if os.path.exists(fn):
+            snapshot_conf_path = fn
+            break
+
+    if snapshot_conf_path is None:
+        logger.error('Missing snapshot.json')
+        sys.exit(2)
+
+    for fn in ('tinytuya2mqtt.ini', '/tinytuya2mqtt.ini'):
+        if os.path.exists(fn):
+            tinytuya2mqtt_conf_path = fn
+            break
+
+    if tinytuya2mqtt_conf_path is None:
+        logger.error('Missing tinytuya2mqtt.ini')
+        sys.exit(2)
 
     try:
         # Read snapshop.json
-        with open('snapshot.json', encoding='utf8') as f:
+        with open(snapshot_conf_path, encoding='utf8') as f:
             snapshot = json.load(f)
     except json.decoder.JSONDecodeError:
         logger.error('Invalid snapshot.json!')
@@ -120,7 +135,7 @@ def read_config() -> List[Device]:
     # Read tinytuya2mqtt.ini
     cfg = configparser.ConfigParser(inline_comment_prefixes='#')
 
-    with open('tinytuya2mqtt.ini', encoding='utf8') as f:
+    with open(tinytuya2mqtt_conf_path, encoding='utf8') as f:
         cfg.read_string(f.read())
 
     try:
