@@ -51,6 +51,13 @@ pip install -e .
 Config
 ----------
 
+Two things are required:
+
+ 1. `snapshot.json`
+ 2. `tinytuya2mqtt.ini`
+
+#### snapshot.json
+
 Follow the setup process for
 [tinytuya](https://github.com/jasonacox/tinytuya#setup-wizard---getting-local-keys) using the
 `wizard` which is part of that project. This will create a file `snapshot.json` which is used by
@@ -60,10 +67,15 @@ Follow the setup process for
 python -m tinytuya wizard
 ```
 
-Create a `tinytuya2mqtt.ini` config file, mapping your device pins to the named capabilities. For
-example:
+#### tinytuya2mqtt.ini
+
+Create a `tinytuya2mqtt.ini` config file, mapping your device pins to the named capabilities. Also
+ensure to include your MQTT broker hostname. For example:
 
 ```ini
+[broker]
+hostname = 192.168.1.198
+
 [device bf7bf4939779bbd9afllck]
 fan_state = 1
 fan_speed = 3

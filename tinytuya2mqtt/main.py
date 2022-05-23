@@ -25,7 +25,7 @@ if os.environ.get('TINYTUYA_DEBUG'):
     tinytuya.set_debug()
 
 
-MQTT_BROKER = 'mqtt_broker'  # Hostname set in docker-compose.yml
+MQTT_BROKER = None
 TIME_SLEEP = 5
 
 
@@ -142,9 +142,18 @@ def read_config() -> List[Device]:
         # Map the device pin configurations into the Device class
         for section in cfg.sections():
             parts = section.split(' ')
-            device_id = parts[1]
-            devices[device_id].dps = dict(cfg.items(section))
 
+            if parts[0] == 'device':
+                device_id = parts[1]
+                devices[device_id].dps = dict(cfg.items(section))
+
+            elif parts[0] == 'broker':
+                global MQTT_BROKER  # pylint: disable=global-statement
+                MQTT_BROKER = dict(cfg.items(section))['hostname']
+
+    except KeyError:
+        logger.error('Malformed broker section in tinytuya2mqtt.ini')
+        sys.exit(3)
     except IndexError:
         logger.error('Malformed section name in tinytuya2mqtt.ini')
         sys.exit(3)
