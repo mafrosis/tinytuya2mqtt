@@ -1,0 +1,44 @@
+---
+name: tag-release
+on:
+  push:
+    branches:
+      - 'main'
+
+jobs:
+  tag-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          token: ${{ secrets.PAT }}
+
+      - name: Extract version
+        id: version
+        run: |
+          python -m pip install --no-deps .
+          echo "::set-output name=version::$(python -c 'import tinytuya2mqtt; print(tinytuya2mqtt.__version__)')"
+
+      - name: Check tags
+        id: tags
+        run: |
+          echo "::set-output name=needs_release::$(if git describe --match v$VERSION; then echo 0; else echo 1; fi)"
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+
+      - name: Log variables
+        run: |
+          echo version=${{ steps.version.outputs.version }}
+          echo needs_release=${{ steps.tags.outputs.needs_release }}
+
+      - name: Create tag
+        if: steps.tags.outputs.needs_release == 1
+        run: |
+          git config user.email "github@mafro.net"
+          git config user.name "GHA Bot"
+          git tag -a -m v$VERSION v$VERSION
+          git push --tags
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
