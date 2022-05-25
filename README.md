@@ -77,13 +77,13 @@ ensure to include your MQTT broker hostname. For example:
 hostname = 192.168.1.198
 
 [device bf7bf4939779bbd9afllck]
-fan_state = 1
-fan_speed = 3
+fan_state_pin = 1
+fan_speed_pin = 3
 fan_speed_steps = 1,2,3,4,5,6
-light_state = 15
-light_brightness = 16
+light_state_pin = 15
+light_brightness_pin = 16
 light_brightness_steps = 25,125,275,425,575,725,900,1000
-light_temp = 17
+light_temp_pin = 17
 
 [device bf66790922f582082fao6p]
 fan_state = 1
@@ -98,10 +98,10 @@ Device types and capabilities supported by `tinytuya2mqtt`:
 
 |Type|Subtype|Name|Example|
 |---|---|---|---|
-|Fan|Fan|`fan_state`|`1`|
-|Fan|Fan|`fan_speed`|`3`|
+|Fan|Fan|`fan_state_pin`|`1`|
+|Fan|Fan|`fan_speed_pin`|`3`|
 |Fan|Fan|`fan_speed_steps`|`1,2,3,4,5,6`|
-|Fan|Light|`light_state`|`15`|
-|Fan|Light|`light_brightness`|`16`|
+|Fan|Light|`light_state_pin`|`15`|
+|Fan|Light|`light_brightness_pin`|`16`|
 |Fan|Light|`light_brightness_steps`|`25,125,275,425,575,725,900,1000`|
-|Fan|Light|`light_temp`|`17`|
+|Fan|Light|`light_temp_pin`|`17`|

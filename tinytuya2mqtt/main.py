@@ -68,7 +68,7 @@ def autoconfigure_ha_fan(device: Device):
     )
 
     # Publish fan light discovery topic, if the fan has a light
-    if device.dps.get('light_state'):
+    if device.dps.get('light_state_pin'):
         data = {
             'name': f'{device.name} Light',
             'unique_id': device.id,#f'{device.id}_light',
@@ -214,7 +214,7 @@ def on_message(_, userdata: dict, msg: bytes):
 
     # Fan on/off
     if msg.topic.endswith('/fan/command'):
-        dps = device.dps['fan_state']
+        dps = device.dps['fan_state_pin']
         val = bool(msg.payload == b'ON')
 
         logger.debug('Setting %s to %s', dps, val)
@@ -222,7 +222,7 @@ def on_message(_, userdata: dict, msg: bytes):
 
     # Fan speed
     elif msg.topic.endswith('/fan/speed/command'):
-        dps = device.dps['fan_speed']
+        dps = device.dps['fan_speed_pin']
         val = pct_to_speed(int(msg.payload), device.dps['fan_speed_steps'][-1])
 
         logger.debug('Setting %s to %s', dps, val)
@@ -230,7 +230,7 @@ def on_message(_, userdata: dict, msg: bytes):
 
     # Light on/off
     elif msg.topic.endswith('/light/command'):
-        dps = device.dps['light_state']
+        dps = device.dps['light_state_pin']
         val = bool(msg.payload == b'ON')
 
         logger.debug('Setting %s to %s', dps, val)
@@ -238,7 +238,7 @@ def on_message(_, userdata: dict, msg: bytes):
 
     # Light brightness
     elif msg.topic.endswith('/light/brightness/command'):
-        dps = device.dps['light_brightness']
+        dps = device.dps['light_brightness_pin']
         val = pct_to_speed(int(msg.payload), device.dps['light_brightness_steps'][-1])
 
         logger.debug('Setting %s to %s', dps, val)
@@ -301,36 +301,36 @@ def read_and_publish_status(device: Device):
     ]
 
     # Publish fan state
-    if device.dps.get('fan_state') in status:
+    if device.dps.get('fan_state_pin') in status:
         msgs.append(
-            (f'home/{device.id}/fan/state', 'ON' if status[device.dps['fan_state']] else 'OFF')
+            (f'home/{device.id}/fan/state', 'ON' if status[device.dps['fan_state_pin']] else 'OFF')
         )
 
     # Publish light state
-    if device.dps.get('light_state') in status:
+    if device.dps.get('light_state_pin') in status:
         msgs.append(
-            (f'home/{device.id}/light/state', 'ON' if status[device.dps['light_state']] else 'OFF')
+            (f'home/{device.id}/light/state', 'ON' if status[device.dps['light_state_pin']] else 'OFF')
         )
 
     # Publish fan speed
-    if device.dps.get('fan_speed') in status:
+    if device.dps.get('fan_speed_pin') in status:
         msgs.append(
             (
                 f'home/{device.id}/fan/speed/state',
                 speed_to_pct(
-                    status[device.dps['fan_speed']],
+                    status[device.dps['fan_speed_pin']],
                     device.dps['fan_speed_steps'][-1],
                 ),
             )
         )
 
     # Publish light brightness
-    if device.dps.get('light_brightness') in status:
+    if device.dps.get('light_brightness_pin') in status:
         msgs.append(
             (
                 f'home/{device.id}/light/brightness/state',
                 speed_to_pct(
-                    status[device.dps['light_brightness']],
+                    status[device.dps['light_brightness_pin']],
                     device.dps['light_brightness_steps'][-1],
                 ),
             )
