@@ -4,8 +4,11 @@ version: '3'
 services:
   tinytuya2mqtt:
     image: ghcr.io/mafrosis/tinytuya2mqtt
+    restart: unless-stopped
     build:
       context: .
+    environment:
+      - DEBUG
     volumes:
       - ./snapshot.json:/snapshot.json:ro
       - ./tinytuya2mqtt.ini:/tinytuya2mqtt.ini:ro
