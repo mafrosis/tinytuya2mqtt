@@ -40,9 +40,9 @@ class Device:
     tuya: tinytuya.OutletDevice = dataclasses.field(default=None)
 
 
-def autoconfigure_ha_fan(device: Device):
+def autoconfigure_fan(device: Device):
     '''
-    Send discovery messages to auto configure the fans in HA
+    Send MQTT discovery messages for a fan entity
 
     Params:
         device:  An instance of Device dataclass
@@ -67,30 +67,54 @@ def autoconfigure_ha_fan(device: Device):
         f'homeassistant/fan/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True,
     )
 
+    logger.info('Autodiscovery topic published for %s on %s', device.name, device.id)
+
+
+def autoconfigure_light(device: Device):
+    '''
+    Send MQTT discovery messages for a light entity
+
+    Params:
+        device:  An instance of Device dataclass
+    '''
+    device_name = f'{device.name} Light'
+
+    data = {
+        'name': device_name,
+        'unique_id': device.id,
+        'availability_topic': f'home/{device.id}/online',
+        'state_topic': f'home/{device.id}/light/state',  # light ON/OFF
+        'command_topic': f'home/{device.id}/light/command',
+        'brightness_scale': 100,
+        'brightness_state_topic': f'home/{device.id}/light/brightness/state',
+        'brightness_command_topic': f'home/{device.id}/light/brightness/command',
+        'device': {
+            'identifiers': [device.id, device.mac],
+            'name': device.name,
+            'manufacturer': 'Fanco',
+            'model': 'Infinity iD DC',
+            'sw_version': f'tinytuya {tinytuya.version}',
+        }
+    }
+    publish.single(
+        f'homeassistant/light/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True,
+    )
+
+    logger.info('Autodiscovery topic published for %s on %s', device_name, device.id)
+
+
+def autoconfigure_device_entities(device: Device):
+    '''
+    Send MQTT discovery messages to autoconfigure devices in HA
+
+    Params:
+        device:  An instance of Device dataclass
+    '''
+    autoconfigure_fan(device)
+
     # Publish fan light discovery topic, if the fan has a light
     if device.dps.get('light_state_pin'):
-        data = {
-            'name': f'{device.name} Light',
-            'unique_id': device.id,#f'{device.id}_light',
-            'availability_topic': f'home/{device.id}/online',
-            'state_topic': f'home/{device.id}/light/state',  # light ON/OFF
-            'command_topic': f'home/{device.id}/light/command',
-            'brightness_scale': 100,
-            'brightness_state_topic': f'home/{device.id}/light/brightness/state',
-            'brightness_command_topic': f'home/{device.id}/light/brightness/command',
-            'device': {
-                'identifiers': [device.id, device.mac],
-                'name': device.name,
-                'manufacturer': 'Fanco',
-                'model': 'Infinity iD DC',
-                'sw_version': f'tinytuya {tinytuya.version}',
-            }
-        }
-        publish.single(
-            f'homeassistant/light/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True,
-        )
-
-    logger.info('Autodiscovery topic published for %s at %s', device.name, device.id)
+        autoconfigure_light(device)
 
 
 def read_config() -> List[Device]:
@@ -166,7 +190,7 @@ def main():
     Read config and start the app
     '''
     for device in read_config():
-        autoconfigure_ha_fan(device)
+        autoconfigure_device_entities(device)
 
         # Starting polling this device on a thread
         t = threading.Thread(target=poll, args=(device,))
