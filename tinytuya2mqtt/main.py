@@ -36,8 +36,25 @@ class Device:
     key: str
     mac: str
     ip: str
-    dps: dict = dataclasses.field(default=None)
+    entities: List['Entity'] = dataclasses.field(default_factory=list)
     tuya: tinytuya.OutletDevice = dataclasses.field(default=None)
+
+@dataclasses.dataclass
+class Entity:
+    state_pin: str
+    device: Device = dataclasses.field(default=None)
+
+@dataclasses.dataclass
+class Fan(Entity):
+    speed_pin: str = dataclasses.field(default=None)
+    speed_steps: List[int] = dataclasses.field(default=None)
+
+@dataclasses.dataclass
+class Light(Entity):
+    brightness_pin: str = dataclasses.field(default=None)
+    brightness_steps: List[int] = dataclasses.field(default=None)
+    temp_pin: str = dataclasses.field(default=None)
+
 
 
 def autoconfigure_fan(device: Device):
@@ -110,11 +127,11 @@ def autoconfigure_device_entities(device: Device):
     Params:
         device:  An instance of Device dataclass
     '''
-    autoconfigure_fan(device)
-
-    # Publish fan light discovery topic, if the fan has a light
-    if device.dps.get('light_state_pin'):
-        autoconfigure_light(device)
+    for entity in device.entities:
+        if isinstance(entity, Fan):
+            autoconfigure_fan(device)
+        elif isinstance(entity, Light):
+            autoconfigure_light(device)
 
 
 def read_config() -> List[Device]:
@@ -163,13 +180,43 @@ def read_config() -> List[Device]:
         cfg.read_string(f.read())
 
     try:
-        # Map the device pin configurations into the Device class
+        # Map the device entity configurations into the Device class
         for section in cfg.sections():
             parts = section.split(' ')
 
             if parts[0] == 'device':
                 device_id = parts[1]
-                devices[device_id].dps = dict(cfg.items(section))
+
+                if not devices[device_id].entities:
+                    devices[device_id].entities = []
+
+                try:
+                    # Inflate INI section into Entity dataclasses
+                    entities = dict(cfg.items(section))
+
+                    if 'fan_state_pin' in entities:
+                        entity = Fan(
+                            state_pin=entities['fan_state_pin'],
+                            speed_pin=entities['fan_speed_pin'],
+                            speed_steps=[int(i) for i in entities['fan_speed_steps'].split(',')],
+                            device=devices[device_id],
+                        )
+                        devices[device_id].entities.append(entity)
+
+                    if 'light_state_pin' in entities:
+                        entity = Light(
+                            state_pin=entities['light_state_pin'],
+                            brightness_pin=entities['light_brightness_pin'],
+                            brightness_steps=[int(i) for i in entities['light_brightness_steps'].split(',')],
+                            temp_pin=entities['light_temp_pin'],
+                            device=devices[device_id],
+                        )
+                        devices[device_id].entities.append(entity)
+
+                except TypeError as e:
+                    val = str(e).rsplit(' ', maxsplit=1)[-1]
+                    logger.error('Invalid pin name in tinytuya2mqtt.ini: %s', val)
+                    sys.exit(3)
 
             elif parts[0] == 'broker':
                 global MQTT_BROKER  # pylint: disable=global-statement
@@ -236,40 +283,49 @@ def on_message(_, userdata: dict, msg: bytes):
 
     device: Device = userdata['device']
 
+    entity = None
+
+    if msg.topic.startswith(f'home/{device.id}/fan'):
+        entity = next((e for e in device.entities if isinstance(e, Fan)), None)
+    elif msg.topic.startswith(f'home/{device.id}/light'):
+        entity = next((e for e in device.entities if isinstance(e, Light)), None)
+
+    if not entity:
+        logger.error('Unrecognized command: %s', msg.topic)
+        return
+
     # Fan on/off
     if msg.topic.endswith('/fan/command'):
-        dps = device.dps['fan_state_pin']
-        val = bool(msg.payload == b'ON')
-
-        logger.debug('Setting %s to %s', dps, val)
-        device.tuya.set_status(val, switch=dps)
+        _set_status(device, entity.state_pin, bool(msg.payload == b'ON'))
 
     # Fan speed
     elif msg.topic.endswith('/fan/speed/command'):
-        dps = device.dps['fan_speed_pin']
-        val = pct_to_speed(int(msg.payload), device.dps['fan_speed_steps'][-1])
-
-        logger.debug('Setting %s to %s', dps, val)
-        device.tuya.set_value(dps, val)
+        val = pct_to_speed(int(msg.payload), entity.speed_steps[-1])
+        _set_value(device, entity.speed_pin, val)
 
     # Light on/off
     elif msg.topic.endswith('/light/command'):
-        dps = device.dps['light_state_pin']
-        val = bool(msg.payload == b'ON')
-
-        logger.debug('Setting %s to %s', dps, val)
-        device.tuya.set_status(val, switch=dps)
+        _set_status(device, entity.state_pin, bool(msg.payload == b'ON'))
 
     # Light brightness
     elif msg.topic.endswith('/light/brightness/command'):
-        dps = device.dps['light_brightness_pin']
-        val = pct_to_speed(int(msg.payload), device.dps['light_brightness_steps'][-1])
-
-        logger.debug('Setting %s to %s', dps, val)
-        device.tuya.set_value(dps, val)
+        val = pct_to_speed(int(msg.payload), entity.brightness_steps[-1])
+        _set_value(device, entity.brightness_pin, val)
 
     # Immediately publish status back to HA
     read_and_publish_status(userdata['device'])
+
+
+def _set_status(device: Device, pin: str, val: bool):
+    'Set a tinytuya boolean status'
+    logger.debug('Setting %s to %s on %s', pin, val, device.id)
+    device.tuya.set_status(val, switch=pin)
+
+
+def _set_value(device: Device, pin: str, val: int):
+    'Set a tinytuya integer value'
+    logger.debug('Setting %s to %s on %s', pin, val, device.id)
+    device.tuya.set_value(pin, val)
 
 
 def poll(device: Device):
@@ -304,6 +360,46 @@ def poll(device: Device):
         logger.info('fin')
 
 
+def build_fan_msgs(status: dict, entity: Entity) -> List[tuple]:
+    '''
+    Return the state of the fan as MQTT messages
+
+    Params:
+        status:  Status dict returned from tinytuya
+        entity:  The fan entity
+    '''
+    msgs = [(
+        f'home/{entity.device.id}/fan/state', 'ON' if status[entity.state_pin] else 'OFF'
+    )]
+
+    if entity.speed_pin in status:
+        msgs.append((
+            f'home/{entity.device.id}/fan/speed/state',
+            speed_to_pct(status[entity.speed_pin], entity.speed_steps[-1])
+        ))
+    return msgs
+
+
+def build_light_msgs(status: dict, entity: Entity) -> List[tuple]:
+    '''
+    Return the state of the light as MQTT messages
+
+    Params:
+        status:  Status dict returned from tinytuya
+        entity:  The light entity
+    '''
+    msgs = [(
+        f'home/{entity.device.id}/light/state', 'ON' if status[entity.state_pin] else 'OFF'
+    )]
+
+    if entity.brightness_pin in status:
+        msgs.append((
+            f'home/{entity.device.id}/light/brightness/state',
+            speed_to_pct(status[entity.brightness_pin], entity.brightness_steps[-1])
+        ))
+    return msgs
+
+
 def read_and_publish_status(device: Device):
     '''
     Fetch device current status and publish on MQTT
@@ -311,54 +407,25 @@ def read_and_publish_status(device: Device):
     Params:
         device:  An instance of Device dataclass
     '''
-    status = device.tuya.status().get('dps')
+    try:
+        status = device.tuya.status().get('dps')
+    except AttributeError:
+        return
+
     logger.debug('STATUS:  %s', status)
     if not status:
         logger.error('Failed getting device status %s', device.id)
         return
 
-    # Make all keys integers, for convenience compat with Device.dps integers
-    status = {int(k):v for k,v in status.items()}
+    msgs = [(f'home/{device.id}/online', 'online')]
 
-    msgs = [
-        (f'home/{device.id}/online', 'online')
-    ]
+    for entity in device.entities:
+        if isinstance(entity, Fan):
+            entity_msgs = build_fan_msgs(status, entity)
+        elif isinstance(entity, Light):
+            entity_msgs = build_light_msgs(status, entity)
 
-    # Publish fan state
-    if device.dps.get('fan_state_pin') in status:
-        msgs.append(
-            (f'home/{device.id}/fan/state', 'ON' if status[device.dps['fan_state_pin']] else 'OFF')
-        )
-
-    # Publish light state
-    if device.dps.get('light_state_pin') in status:
-        msgs.append(
-            (f'home/{device.id}/light/state', 'ON' if status[device.dps['light_state_pin']] else 'OFF')
-        )
-
-    # Publish fan speed
-    if device.dps.get('fan_speed_pin') in status:
-        msgs.append(
-            (
-                f'home/{device.id}/fan/speed/state',
-                speed_to_pct(
-                    status[device.dps['fan_speed_pin']],
-                    device.dps['fan_speed_steps'][-1],
-                ),
-            )
-        )
-
-    # Publish light brightness
-    if device.dps.get('light_brightness_pin') in status:
-        msgs.append(
-            (
-                f'home/{device.id}/light/brightness/state',
-                speed_to_pct(
-                    status[device.dps['light_brightness_pin']],
-                    device.dps['light_brightness_steps'][-1],
-                ),
-            )
-        )
+        msgs += entity_msgs
 
     logger.debug('PUBLISH: %s', msgs)
     publish.multiple(msgs, hostname=MQTT_BROKER)
