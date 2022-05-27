@@ -173,14 +173,28 @@ def main():
         t.start()
 
 
-def on_connect(client, userdata, _1, _2):
+def on_connect(client, userdata, flags, rc):  # pylint: disable=unused-argument
     '''
     On broker connected, subscribe to the command topics
     '''
+    command_topics = []
+
     for cmd in ('fan', 'fan/speed', 'light', 'light/brightness'):
         command_topic = f"home/{userdata['device'].id}/{cmd}/command"
-        client.subscribe(command_topic, 0)
-        logger.info('Subscribed to %s', command_topic)
+        command_topics.append((command_topic, 0))
+
+    ret = client.subscribe(command_topics, 0)
+    logger.info('Subscribing to %s: %s', command_topics, ret)
+
+
+def on_disconnect(client, userdata, rc):  # pylint: disable=unused-argument
+    'Debug logging of disconnects'
+    logger.debug('Disconnect: %s', rc)
+
+
+def on_log(client, userdata, level, buf):  # pylint: disable=unused-argument
+    'Debug logging of MQTT messages from the Paho client'
+    logger.debug(buf)
 
 
 def on_message(_, userdata: dict, msg: bytes):
@@ -251,6 +265,8 @@ def poll(device: Device):
     client = mqtt.Client(device.id, userdata={'device': device})
     client.on_connect = on_connect
     client.on_message = on_message
+    client.on_disconnect = on_disconnect
+    client.on_log = on_log
     client.connect(MQTT_BROKER)
     client.loop_start()
 
