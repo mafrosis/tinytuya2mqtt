@@ -3,7 +3,7 @@ version: '3'
 
 services:
   tinytuya2mqtt:
-    image: ghcr.io/mafrosis/tinytuya2mqtt
+    image: ghcr.io/mafrosis/tinytuya2mqtt:dev
     restart: unless-stopped
     build:
       context: .
