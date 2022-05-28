@@ -368,6 +368,10 @@ def build_fan_msgs(status: dict, entity: Entity) -> List[tuple]:
         status:  Status dict returned from tinytuya
         entity:  The fan entity
     '''
+    if entity.state_pin not in status:
+        logger.error('Fan.state_pin %s absent in status: %s', entity.state_pin, status)
+        return
+
     msgs = [(
         f'home/{entity.device.id}/fan/state', 'ON' if status[entity.state_pin] else 'OFF'
     )]
@@ -388,6 +392,10 @@ def build_light_msgs(status: dict, entity: Entity) -> List[tuple]:
         status:  Status dict returned from tinytuya
         entity:  The light entity
     '''
+    if entity.state_pin not in status:
+        logger.error('Light.state_pin %s absent in status: %s', entity.state_pin, status)
+        return
+
     msgs = [(
         f'home/{entity.device.id}/light/state', 'ON' if status[entity.state_pin] else 'OFF'
     )]
