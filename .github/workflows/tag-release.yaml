@@ -9,10 +9,17 @@ jobs:
   tag-release:
     runs-on: ubuntu-latest
 
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      needs_release: ${{ steps.tags.outputs.needs_release }}
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
+          # Fetch all history & tags
+          fetch-depth: 0
+          # Checkout with PAT so that git push triggers further Actions
           token: ${{ secrets.PAT }}
 
       - name: Extract version
@@ -24,7 +31,7 @@ jobs:
       - name: Check tags
         id: tags
         run: |
-          echo "::set-output name=needs_release::$(if git describe --match v$VERSION; then echo 0; else echo 1; fi)"
+          echo "::set-output name=needs_release::$(git describe --match v$VERSION &>/dev/null; echo $?)"
         env:
           VERSION: ${{ steps.version.outputs.version }}
 
@@ -34,7 +41,8 @@ jobs:
           echo needs_release=${{ steps.tags.outputs.needs_release }}
 
       - name: Create tag
-        if: steps.tags.outputs.needs_release == 1
+        # Git describe exits with 128 when a tag is not found
+        if: steps.tags.outputs.needs_release > 0
         run: |
           git config user.email "github@mafro.net"
           git config user.name "GHA Bot"
@@ -42,3 +50,26 @@ jobs:
           git push --tags
         env:
           VERSION: ${{ steps.version.outputs.version }}
+
+
+  gh-release:
+    runs-on: ubuntu-latest
+    needs: [tag-release]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        if: needs.tag-release.outputs.needs_release > 0
+
+      - name: Build wheel
+        if: needs.tag-release.outputs.needs_release > 0
+        run: python -m pip wheel --no-deps --wheel-dir dist .
+
+      - name: Create GH release
+        uses: softprops/action-gh-release@v1
+        if: needs.tag-release.outputs.needs_release > 0
+        with:
+          tag_name: v${{ needs.tag-release.outputs.version }}
+          token: ${{ secrets.PAT }}
+          files: |
+            dist/*.whl
