@@ -69,7 +69,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         if: needs.tag-release.outputs.needs_release > 0
         with:
-          tag_name: ${{ needs.tag-release.outputs.version }}
+          tag_name: v${{ needs.tag-release.outputs.version }}
           token: ${{ secrets.PAT }}
           files: |
             dist/*.whl
