@@ -420,7 +420,9 @@ def read_and_publish_status(device: Device):
     except AttributeError:
         return
 
-    logger.debug('STATUS:  %s', status)
+    logger.debug('RAW:     %s', status)
+    logger.debug('STATUS:  %s', _get_friendly_status(device, status))
+
     if not status:
         logger.error('Failed getting device status %s', device.id)
         return
@@ -447,3 +449,20 @@ def speed_to_pct(raw: int, max_: int) -> int:
 def pct_to_speed(percentage: int, max_: int) -> int:
     'Convert a percentage to a raw value'
     return round(percentage / 100 * max_)
+
+
+def _get_friendly_status(device: Device, status: dict) -> dict:
+    'Return a friendly device status mapped to the user configuration'
+    output = {}
+
+    for entity in device.entities:
+        # Return entity.state_pin status
+        output['{}_state'.format(type(entity).__name__.lower())] = status[entity.state_pin]
+
+        # Return entity type-specific pin statuses
+        if isinstance(entity, Fan):
+            output['fan_speed_pin'] = status[entity.speed_pin]
+        elif isinstance(entity, Light):
+            output['light_brightness_pin'] = status[entity.brightness_pin]
+
+    return output
