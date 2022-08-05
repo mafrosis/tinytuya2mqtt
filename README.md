@@ -27,7 +27,7 @@ Ensure `tinytuya2mqtt.ini` and `snapshot.json` are in the current directory. Ens
 has been set in `docker-compose.yml`:
 
 ```
-docker compose up --no-build
+make run
 ```
 
 Or, without `docker`:
@@ -39,7 +39,7 @@ Setup
 ----------
 
 ```
-docker compose build
+make build
 ```
 
 Or, without `docker`:
