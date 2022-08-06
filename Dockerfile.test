@@ -1,0 +1,9 @@
+FROM ghcr.io/mafrosis/tinytuya2mqtt:dev
+
+# Install lint, test tools
+ADD requirements-dev.txt /src/
+RUN pip install -r requirements-dev.txt
+
+ADD .pylintrc /src
+
+ENTRYPOINT ["pytest"]

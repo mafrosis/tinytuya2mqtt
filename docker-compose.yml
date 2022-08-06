@@ -12,3 +12,13 @@ services:
     volumes:
       - ./snapshot.json:/snapshot.json:ro
       - ./tinytuya2mqtt.ini:/tinytuya2mqtt.ini:ro
+
+  test:
+    image: mafrosis/tinytuya2mqtt:test
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    volumes:
+      - ./snapshot.json:/snapshot.json:ro
+      - ./tinytuya2mqtt.ini:/tinytuya2mqtt.ini:ro
+      - ./tinytuya2mqtt:/src/tinytuya2mqtt
