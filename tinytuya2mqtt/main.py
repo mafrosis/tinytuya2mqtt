@@ -6,7 +6,7 @@ import os
 import sys
 import threading
 import time
-from typing import List
+from typing import List, Optional
 
 from paho.mqtt import publish
 import paho.mqtt.client as mqtt
@@ -42,18 +42,18 @@ class Device:
 @dataclasses.dataclass
 class Entity:
     state_pin: str
-    device: Device = dataclasses.field(default=None)
+    device: Device
 
 @dataclasses.dataclass
 class Fan(Entity):
-    speed_pin: str = dataclasses.field(default=None)
-    speed_steps: List[int] = dataclasses.field(default=None)
+    speed_pin: str
+    speed_steps: List[int]
 
 @dataclasses.dataclass
 class Light(Entity):
-    brightness_pin: str = dataclasses.field(default=None)
-    brightness_steps: List[int] = dataclasses.field(default=None)
-    temp_pin: str = dataclasses.field(default=None)
+    brightness_pin: str
+    brightness_steps: List[int]
+    temp_pin: str
 
 
 
@@ -191,6 +191,8 @@ def read_config() -> List[Device]:
                     devices[device_id].entities = []
 
                 try:
+                    entity: Entity
+
                     # Inflate INI section into Entity dataclasses
                     entities = dict(cfg.items(section))
 
@@ -229,7 +231,7 @@ def read_config() -> List[Device]:
         logger.error('Malformed section name in tinytuya2mqtt.ini')
         sys.exit(3)
 
-    return devices.values()
+    return list(devices.values())
 
 
 def main():
@@ -268,7 +270,7 @@ def on_log(client, userdata, level, buf):  # pylint: disable=unused-argument
     logger.debug(buf)
 
 
-def on_message(_, userdata: dict, msg: bytes):
+def on_message(_, userdata: dict, msg: mqtt.MQTTMessage):
     '''
     On command message received, take some action
 
@@ -283,7 +285,7 @@ def on_message(_, userdata: dict, msg: bytes):
 
     device: Device = userdata['device']
 
-    entity = None
+    entity: Entity = None
 
     if msg.topic.startswith(f'home/{device.id}/fan'):
         entity = next((e for e in device.entities if isinstance(e, Fan)), None)
