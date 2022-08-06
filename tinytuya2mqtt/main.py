@@ -457,14 +457,36 @@ def _get_friendly_status(device: Device, status: dict) -> dict:
     'Return a friendly device status mapped to the user configuration'
     output = {}
 
+    if not status:
+        logger.error('Empty status returned from device %s!', device.name)
+        return {}
+
+    def _get_state(pin):
+        state = status.get(pin)
+        if state is None:
+            logger.error('Failed getting state on pin %s', pin)
+            return None
+        return state
+
     for entity in device.entities:
         # Return entity.state_pin status
-        output['{}_state'.format(type(entity).__name__.lower())] = status[entity.state_pin]
+        state = _get_state(entity.state_pin)
+        if state is None:
+            continue
+
+        output[f'{type(entity).__name__.lower()}_state'] = state
 
         # Return entity type-specific pin statuses
         if isinstance(entity, Fan):
+            state = _get_state(entity.speed_pin)
+            if state is None:
+                continue
             output['fan_speed_pin'] = status[entity.speed_pin]
+
         elif isinstance(entity, Light):
+            state = _get_state(entity.brightness_pin)
+            if state is None:
+                continue
             output['light_brightness_pin'] = status[entity.brightness_pin]
 
     return output
