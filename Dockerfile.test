@@ -6,4 +6,6 @@ RUN pip install -r requirements-dev.txt
 
 ADD .pylintrc /src
 
+ENV MYPYPATH=/mypy-stubs
+
 ENTRYPOINT ["pytest"]

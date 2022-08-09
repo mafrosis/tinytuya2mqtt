@@ -10,6 +10,10 @@ run:
 lint:
 	docker compose run --rm --entrypoint=pylint test /src/tinytuya2mqtt
 
+.PHONY: typecheck
+typecheck:
+	docker compose run --rm test --mypy /src/tinytuya2mqtt
+
 .PHONY: gen-stubs
 gen-stubs:
 	mkdir -p stubs
