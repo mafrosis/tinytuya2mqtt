@@ -6,7 +6,7 @@ import os
 import sys
 import threading
 import time
-from typing import List, Optional
+from typing import cast, List, Optional, Tuple, Union
 
 from paho.mqtt import publish
 import paho.mqtt.client as mqtt
@@ -25,7 +25,7 @@ if os.environ.get('TINYTUYA_DEBUG'):
     tinytuya.set_debug()
 
 
-MQTT_BROKER = None
+MQTT_BROKER = 'localhost'
 TIME_SLEEP = 5
 
 
@@ -36,8 +36,8 @@ class Device:
     key: str
     mac: str
     ip: str
+    tuya: tinytuya.OutletDevice
     entities: List['Entity'] = dataclasses.field(default_factory=list)
-    tuya: tinytuya.OutletDevice = dataclasses.field(default=None)
 
 @dataclasses.dataclass
 class Entity:
@@ -167,9 +167,18 @@ def read_config() -> List[Device]:
         logger.error('Invalid snapshot.json!')
         sys.exit(3)
 
+    def _create_tinytuya(id_, ip, key):
+        t = tinytuya.OutletDevice(id_, ip, key)
+        t.set_version(3.3)
+        t.set_socketPersistent(True)
+        return t
+
     # Create a dict of Device objects from snapshot.json
     devices = {
-        d['id']: Device(d['name'], d['id'], d['key'], d['mac'], d['ip'])
+        d['id']: Device(
+            d['name'], d['id'], d['key'], d['mac'], d['ip'],
+            _create_tinytuya(d['id'], d['ip'], d['key'])
+        )
         for d in snapshot['devices']
     }
 
@@ -285,43 +294,43 @@ def on_message(_, userdata: dict, msg: mqtt.MQTTMessage):
 
     device: Device = userdata['device']
 
-    entity: Entity = None
-
     if msg.topic.startswith(f'home/{device.id}/fan'):
-        entity = next((e for e in device.entities if isinstance(e, Fan)), None)
-    elif msg.topic.startswith(f'home/{device.id}/light'):
-        entity = next((e for e in device.entities if isinstance(e, Light)), None)
+        fan = cast(Fan, next((e for e in device.entities if isinstance(e, Fan)), None))
 
-    if not entity:
+        # Fan on/off
+        if msg.topic.endswith('/command'):
+            _set_status(device, fan.state_pin, bool(msg.payload == b'ON'))
+
+        # Fan speed
+        elif msg.topic.endswith('/speed/command'):
+            val = pct_to_speed(int(msg.payload), fan.speed_steps[-1])
+            _set_value(device, fan.speed_pin, val)
+
+
+    elif msg.topic.startswith(f'home/{device.id}/light'):
+        light = cast(Light, next((e for e in device.entities if isinstance(e, Light)), None))
+
+        # Light on/off
+        if msg.topic.endswith('/command'):
+            _set_status(device, light.state_pin, bool(msg.payload == b'ON'))
+
+        # Light brightness
+        elif msg.topic.endswith('/brightness/command'):
+            val = pct_to_speed(int(msg.payload), light.brightness_steps[-1])
+            _set_value(device, light.brightness_pin, val)
+
+    else:
         logger.error('Unrecognized command: %s', msg.topic)
         return
 
-    # Fan on/off
-    if msg.topic.endswith('/fan/command'):
-        _set_status(device, entity.state_pin, bool(msg.payload == b'ON'))
-
-    # Fan speed
-    elif msg.topic.endswith('/fan/speed/command'):
-        val = pct_to_speed(int(msg.payload), entity.speed_steps[-1])
-        _set_value(device, entity.speed_pin, val)
-
-    # Light on/off
-    elif msg.topic.endswith('/light/command'):
-        _set_status(device, entity.state_pin, bool(msg.payload == b'ON'))
-
-    # Light brightness
-    elif msg.topic.endswith('/light/brightness/command'):
-        val = pct_to_speed(int(msg.payload), entity.brightness_steps[-1])
-        _set_value(device, entity.brightness_pin, val)
-
-    # Immediately publish status back to HA
+    # Immediately publish status
     read_and_publish_status(userdata['device'])
 
 
 def _set_status(device: Device, pin: str, val: bool):
     'Set a tinytuya boolean status'
     logger.debug('Setting %s to %s on %s', pin, val, device.id)
-    device.tuya.set_status(val, switch=pin)
+    device.tuya.set_status(val, switch=int(pin))
 
 
 def _set_value(device: Device, pin: str, val: int):
@@ -362,50 +371,50 @@ def poll(device: Device):
         logger.info('fin')
 
 
-def build_fan_msgs(status: dict, entity: Entity) -> List[tuple]:
+def build_fan_msgs(status: dict, fan: Fan) -> List[Tuple[str, str, int, bool]]:
     '''
     Return the state of the fan as MQTT messages
 
     Params:
         status:  Status dict returned from tinytuya
-        entity:  The fan entity
+        fan:  The fan fan
     '''
-    if entity.state_pin not in status:
-        logger.error('Fan.state_pin %s absent in status: %s', entity.state_pin, status)
-        return
+    if fan.state_pin not in status:
+        logger.error('Fan.state_pin %s absent in status: %s', fan.state_pin, status)
+        return []
 
     msgs = [(
-        f'home/{entity.device.id}/fan/state', 'ON' if status[entity.state_pin] else 'OFF'
+        f'home/{fan.device.id}/fan/state', 'ON' if status[fan.state_pin] else 'OFF', 0, False,
     )]
 
-    if entity.speed_pin in status:
+    if fan.speed_pin in status:
         msgs.append((
-            f'home/{entity.device.id}/fan/speed/state',
-            speed_to_pct(status[entity.speed_pin], entity.speed_steps[-1])
+            f'home/{fan.device.id}/fan/speed/state',
+            str(speed_to_pct(status[fan.speed_pin], fan.speed_steps[-1])), 0, False,
         ))
     return msgs
 
 
-def build_light_msgs(status: dict, entity: Entity) -> List[tuple]:
+def build_light_msgs(status: dict, light: Light) -> List[Tuple[str, str, int, bool]]:
     '''
     Return the state of the light as MQTT messages
 
     Params:
         status:  Status dict returned from tinytuya
-        entity:  The light entity
+        light:  The light light
     '''
-    if entity.state_pin not in status:
-        logger.error('Light.state_pin %s absent in status: %s', entity.state_pin, status)
-        return
+    if light.state_pin not in status:
+        logger.error('Light.state_pin %s absent in status: %s', light.state_pin, status)
+        return []
 
     msgs = [(
-        f'home/{entity.device.id}/light/state', 'ON' if status[entity.state_pin] else 'OFF'
+        f'home/{light.device.id}/light/state', 'ON' if status[light.state_pin] else 'OFF', 0, False,
     )]
 
-    if entity.brightness_pin in status:
+    if light.brightness_pin in status:
         msgs.append((
-            f'home/{entity.device.id}/light/brightness/state',
-            speed_to_pct(status[entity.brightness_pin], entity.brightness_steps[-1])
+            f'home/{light.device.id}/light/brightness/state',
+            str(speed_to_pct(status[light.brightness_pin], light.brightness_steps[-1])), 0, False,
         ))
     return msgs
 
@@ -429,7 +438,7 @@ def read_and_publish_status(device: Device):
         logger.error('Failed getting device status %s', device.id)
         return
 
-    msgs = [(f'home/{device.id}/online', 'online')]
+    msgs = [(f'home/{device.id}/online', 'online', 0, False)]
 
     for entity in device.entities:
         if isinstance(entity, Fan):
