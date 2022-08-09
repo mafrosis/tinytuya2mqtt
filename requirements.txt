@@ -1,2 +1,2 @@
-paho-mqtt
-tinytuya
+paho-mqtt==1.6.1
+tinytuya==1.6.5
