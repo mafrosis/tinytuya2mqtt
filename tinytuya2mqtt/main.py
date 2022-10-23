@@ -40,32 +40,58 @@ class Device:
     tuya: tinytuya.OutletDevice = dataclasses.field(default=None)
 
 
-def autoconfigure_ha_fan(device: Device):
+def autoconfigure_ha(device: Device):
     '''
-    Send discovery messages to auto configure the fans in HA
+    Send discovery messages to auto configure the device in HA
 
     Params:
         device:  An instance of Device dataclass
     '''
-    data = {
-        'name': device.name,
-        'unique_id': device.id,
-        'availability_topic': f'home/{device.id}/online',
-        'state_topic': f'home/{device.id}/fan/state',  # fan ON/OFF
-        'command_topic': f'home/{device.id}/fan/command',
-        'percentage_state_topic': f'home/{device.id}/fan/speed/state',
-        'percentage_command_topic': f'home/{device.id}/fan/speed/command',
-        'device': {
-            'identifiers': [device.id, device.mac],
+
+    if device.dps.get('fan_state'):
+        data = {
             'name': device.name,
-            'manufacturer': 'Fanco',
-            'model': 'Infinity iD DC',
-            'sw_version': f'tinytuya {tinytuya.version}',
+            'unique_id': device.id,
+            'availability_topic': f'home/{device.id}/online',
+            'state_topic': f'home/{device.id}/fan/state',  # fan ON/OFF
+            'command_topic': f'home/{device.id}/fan/command',
+            'percentage_state_topic': f'home/{device.id}/fan/speed/state',
+            'percentage_command_topic': f'home/{device.id}/fan/speed/command',
+            'device': {
+                'identifiers': [device.id, device.mac],
+                'name': device.name,
+                'manufacturer': 'Fanco',
+                'model': 'Infinity iD DC',
+                'sw_version': f'tinytuya {tinytuya.version}',
+            }
         }
-    }
-    publish.single(
-        f'homeassistant/fan/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True,
-    )
+        publish.single(
+            f'homeassistant/fan/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True,
+        )
+
+    if device.dps.get('climate_state'):
+        data = {
+            'name': device.name,
+            'unique_id': device.id,
+            'availability_topic': f'home/{device.id}/online',
+            'mode_state_topic': f'home/{device.id}/climate/mode/state',
+            'mode_command_topic': f'home/{device.id}/climate/mode/command',
+            'action_topic': f'home/{device.id}/climate/action',
+            'current_temperature_topic': f'home/{device.id}/climate/current_temperature',
+            'temperature_state_topic': f'home/{device.id}/climate/temperature/state',
+            'temperature_command_topic': f'home/{device.id}/climate/temperature/command',
+            'temp_step': 0.1,
+            'modes': ['off','heat'],
+            'device': {
+                'identifiers': [device.id, device.mac],
+                'name': device.name,
+                'model': 'Thermostat',
+                'sw_version': f'tinytuya {tinytuya.version}',
+            }
+        }
+        publish.single(
+            f'homeassistant/climate/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True,
+        )
 
     # Publish fan light discovery topic, if the fan has a light
     if device.dps.get('light_state'):
@@ -166,7 +192,7 @@ def main():
     Read config and start the app
     '''
     for device in read_config():
-        autoconfigure_ha_fan(device)
+        autoconfigure_ha(device)
 
         # Starting polling this device on a thread
         t = threading.Thread(target=poll, args=(device,))
@@ -177,7 +203,7 @@ def on_connect(client, userdata, _1, _2):
     '''
     On broker connected, subscribe to the command topics
     '''
-    for cmd in ('fan', 'fan/speed', 'light', 'light/brightness'):
+    for cmd in ('fan', 'fan/speed', 'light', 'light/brightness', 'climate/temperature', 'climate/mode'):
         command_topic = f"home/{userdata['device'].id}/{cmd}/command"
         client.subscribe(command_topic, 0)
         logger.info('Subscribed to %s', command_topic)
@@ -230,6 +256,22 @@ def on_message(_, userdata: dict, msg: bytes):
         logger.debug('Setting %s to %s', dps, val)
         device.tuya.set_value(dps, val)
 
+    # Climate temp
+    elif msg.topic.endswith('/climate/temperature/command'):
+        dps = device.dps['set_temperature']
+        val = int(float(msg.payload)*10)
+
+        logger.debug('Setting %s to %s', dps, val)
+        device.tuya.set_value(dps, val)
+
+    # Climate mode
+    elif msg.topic.endswith('/climate/mode/command'):
+        dps = device.dps['climate_state']
+        val = bool(msg.payload == b'heat')
+
+        logger.debug('Setting %s to %s', dps, val)
+        device.tuya.set_value(dps, val)
+
     # Immediately publish status back to HA
     read_and_publish_status(userdata['device'])
 
@@ -257,7 +299,6 @@ def poll(device: Device):
     try:
         while True:
             read_and_publish_status(device)
-
             time.sleep(TIME_SLEEP)
     finally:
         client.loop_stop()
@@ -290,6 +331,18 @@ def read_and_publish_status(device: Device):
             (f'home/{device.id}/fan/state', 'ON' if status[device.dps['fan_state']] else 'OFF')
         )
 
+    # Publish climate state
+    if int(device.dps.get('climate_state')) in status:
+        msgs.append(
+            (f'home/{device.id}/climate/mode/state', 'heat' if status[int(device.dps['climate_state'])] else 'off')
+        )
+
+    # Publish climate state
+    if int(device.dps.get('action')) in status:
+        msgs.append(
+            (f'home/{device.id}/climate/action', 'heating' if int(status[int(device.dps['action'])]) else 'off')
+        )
+
     # Publish light state
     if device.dps.get('light_state') in status:
         msgs.append(
@@ -306,6 +359,18 @@ def read_and_publish_status(device: Device):
                     device.dps['fan_speed_steps'][-1],
                 ),
             )
+        )
+
+    # Publish current temperature
+    if int(device.dps.get('current_temperature')) in status:
+        msgs.append(
+            (f'home/{device.id}/climate/current_temperature', status[int(device.dps['current_temperature'])]/10)
+        )
+
+    # Publish set temperature
+    if int(device.dps.get('set_temperature')) in status:
+        msgs.append(
+            (f'home/{device.id}/climate/temperature/state', status[int(device.dps['set_temperature'])]/10)
         )
 
     # Publish light brightness
