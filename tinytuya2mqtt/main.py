@@ -31,15 +31,266 @@ MQTT_PASSWORD = None
 TIME_SLEEP = 5
 
 
-@dataclasses.dataclass
 class Device:
     name: str
     id: str
     key: str
     mac: str
     ip: str
-    dps: dict = dataclasses.field(default=None)
+    manufacturer: str
+    model: str
+    hb_interval: int
+    hb_time: int
     tuya: tinytuya.OutletDevice = dataclasses.field(default=None)
+
+    def __init__(self, id, config):
+        self.id = id
+        self.name = config['name']
+        self.key = config['key']
+        self.mac = config['mac']
+        self.ip = config['ip']
+        self.hb_interval = 20
+        self.hb_time = time.time() + self.hb_interval
+
+    def connect(self):
+        self.tuya = tinytuya.OutletDevice(self.id, self.ip, self.key)
+        self.tuya.set_version(3.3)
+        self.tuya.set_socketPersistent(True)
+        self.tuya.set_socketTimeout(TIME_SLEEP)
+
+    def send_heartbeat(self):
+        if self.hb_time <= time.time():
+            payload = self.tuya.generate_payload(tinytuya.HEART_BEAT)
+            logger.debug('Send heartbeat to %s (%s)', self.name, self.id)
+            self.tuya.send(payload)
+            self.hb_time = time.time() + self.hb_interval
+
+    def poll_status(self):
+        return self.tuya.status().get('dps')
+
+    def get_ha_device(self):
+        return {
+            'identifiers': [self.id, self.mac],
+            'name': self.name,
+            'manufacturer': self.manufacturer,
+            'model': self.model,
+            'sw_version': f'tinytuya {tinytuya.version}',
+        }
+
+
+class FanDevice(Device):
+    fan_state = 1
+    fan_speed = 3
+    fan_speed_steps = 1,2,3,4,5,6
+
+    def __init__(self, id, config):
+        self.manufacturer = "Fanco"
+        self.model = "Infinity iD DC"
+        super().__init__(id, config)
+
+    def ha_config(self):
+        configs = []
+        fan = {
+            'config': {
+                'name': self.name,
+                'unique_id': self.id,
+                'availability_topic': f'home/{self.id}/online',
+                'state_topic': f'home/{self.id}/fan/state',  # fan ON/OFF
+                'command_topic': f'home/{self.id}/fan/command',
+                'percentage_state_topic': f'home/{self.id}/fan/speed/state',
+                'percentage_command_topic': f'home/{self.id}/fan/speed/command',
+                'device': self.get_ha_device()
+            },
+            'topic': f'homeassistant/fan/{self.id}/config'
+        }
+        configs.append(fan)
+        return configs
+
+    def get_topics(self):
+        topics = []
+        topics.append(f'home/{self.id}/fan/command')
+        topics.append(f'home/{self.id}/fan/speed/command')
+        return topics
+
+    def speed_to_pct(self, raw: int, max_: int) -> int:
+        'Convert a raw value to a percentage'
+        return round(raw / max_ * 100)
+
+    def pct_to_speed(self, percentage: int, max_: int) -> int:
+        'Convert a percentage to a raw value'
+        return round(percentage / 100 * max_)
+
+    def handle_command(self, msg):
+        # Fan on/off
+        if msg.topic.endswith('/fan/command'):
+            dps = self.fan_state
+            val = bool(msg.payload == b'ON')
+
+            logger.debug('Setting %s to %s', dps, val)
+            self.tuya.set_status(val, switch=dps)
+
+        # Fan speed
+        elif msg.topic.endswith('/fan/speed/command'):
+            dps = self.fan_speed
+            val = self.pct_to_speed(int(msg.payload), self.fan_speed_steps[-1])
+
+            logger.debug('Setting %s to %s', dps, val)
+            self.tuya.set_value(dps, val)
+
+        return { dps: val }
+
+    def parse_status(self, status):
+        msgs = []
+
+        # Publish fan state
+        if self.fan_state in status:
+            msgs.append((f'home/{self.id}/fan/state', 'ON' if status[self.fan_state] else 'OFF'))
+
+        # Publish fan speed
+        if self.fan_speed in status:
+            state = self.speed_to_pct(status[self.fan_speed], self.fan_speed_steps[-1])
+            msgs.append((f'home/{self.id}/fan/speed/state', state))
+
+        return msgs
+
+
+class FanWithLightDevice(FanDevice):
+    light_state = 15
+    light_brightness = 16
+    light_brightness_steps = 25,125,275,425,575,725,900,1000
+
+    def __init__(self, id, config):
+        super().__init__(id, config)
+
+    def ha_config(self):
+        configs = super().ha_config()
+        light = {
+           'config': {
+                'name': f'{self.name} Light',
+                'unique_id': self.id,#f'{self.id}_light',
+                'availability_topic': f'home/{self.id}/online',
+                'state_topic': f'home/{self.id}/light/state',  # light ON/OFF
+                'command_topic': f'home/{self.id}/light/command',
+                'brightness_scale': 100,
+                'brightness_state_topic': f'home/{self.id}/light/brightness/state',
+                'brightness_command_topic': f'home/{self.id}/light/brightness/command',
+                'device': self.get_ha_device()
+            },
+            'topic': f'homeassistant/light/{self.id}/config'
+        }
+        configs.append(light)
+        return configs
+
+    def get_topics(self):
+        topics = super().get_topics()
+        topics.append(f'home/{self.id}/light/command')
+        topics.append(f'home/{self.id}/light/brightness/command')
+        return topics
+
+    def handle_command(self, msg):
+        # Light on/off
+        if msg.topic.endswith('/light/command'):
+            dps = self.light_state
+            val = bool(msg.payload == b'ON')
+
+            logger.debug('Setting %s to %s', dps, val)
+            self.tuya.set_status(val, switch=dps)
+
+        # Light brightness
+        elif msg.topic.endswith('/light/brightness/command'):
+            dps = self.light_brightness
+            val = self.pct_to_speed(int(msg.payload), self.light_brightness_steps[-1])
+
+            logger.debug('Setting %s to %s', dps, val)
+            self.tuya.set_value(dps, val)
+        else:
+            return super().handle_command(msg)
+
+        return { dps: val }
+
+    def parse_status(self, status):
+        msgs = super().parse_status(status)
+
+        # Publish light state
+        if self.light_state in status:
+            msgs.append((f'home/{self.id}/light/state', 'ON' if status[self.light_state] else 'OFF'))
+
+        # Publish light brightness
+        if self.light_brightness in status:
+            state = self.speed_to_pct(status[self.light_brightness], self.light_brightness_steps[-1])
+            msgs.append((f'home/{self.id}/light/brightness/state', state))
+
+        return msgs
+
+
+class ClimateDevice(Device):
+    climate_state = 1
+    set_temperature = 2
+    current_temperature = 3
+    action = 5
+
+    def __init__(self, id, config):
+        self.manufacturer = "Beok"
+        self.model = "Thermostat"
+        super().__init__(id, config)
+
+    def ha_config(self):
+        climate = {
+            'config': {
+                'name': self.name,
+                'unique_id': self.id,
+                'availability_topic': f'home/{self.id}/online',
+                'mode_state_topic': f'home/{self.id}/climate/mode/state',
+                'mode_command_topic': f'home/{self.id}/climate/mode/command',
+                'action_topic': f'home/{self.id}/climate/action',
+                'current_temperature_topic': f'home/{self.id}/climate/current_temperature',
+                'temperature_state_topic': f'home/{self.id}/climate/temperature/state',
+                'temperature_command_topic': f'home/{self.id}/climate/temperature/command',
+                'temp_step': 0.1,
+                'modes': ['off','heat'],
+                'device': self.get_ha_device()
+            },
+            'topic': f'homeassistant/climate/{self.id}/config'
+        }
+        return [ climate ]
+
+    def get_topics(self):
+        topics = []
+        topics.append(f'home/{self.id}/climate/temperature/command')
+        topics.append(f'home/{self.id}/climate/mode/command')
+        return topics
+
+    def handle_msg(self, msg):
+        # Climate temp
+        if msg.topic.endswith('/climate/temperature/command'):
+            dps = self.set_temperature
+            val = int(float(msg.payload)*10)
+
+            logger.debug('Setting %s to %s', dps, val)
+            self.tuya.set_value(dps, val)
+
+        # Climate mode
+        elif msg.topic.endswith('/climate/mode/command'):
+            dps = self.climate_state
+            val = bool(msg.payload == b'heat')
+
+            logger.debug('Setting %s to %s', dps, val)
+            self.tuya.set_value(dps, val)
+
+        return { dps: val }
+
+    def parse_status(self, status):
+        msgs = []
+        if self.climate_state in status:
+            msgs.append((f'home/{self.id}/climate/mode/state', 'heat' if status[self.climate_state] else 'off'))
+        if self.action in status:
+            msgs.append((f'home/{self.id}/climate/action', 'heating' if int(status[self.action]) else 'off'))
+        if self.current_temperature in status:
+            msgs.append((f'home/{self.id}/climate/current_temperature', status[self.current_temperature]/10))
+        if self.set_temperature in status:
+            msgs.append((f'home/{self.id}/climate/temperature/state', status[self.set_temperature]/10))
+
+        return msgs
 
 
 def autoconfigure_ha(device: Device):
@@ -47,95 +298,21 @@ def autoconfigure_ha(device: Device):
     Send discovery messages to auto configure the device in HA
 
     Params:
-        device:  An instance of Device dataclass
+        device:  An instance of Device
     '''
 
-    if device.dps.get('fan_state'):
-        data = {
-            'name': device.name,
-            'unique_id': device.id,
-            'availability_topic': f'home/{device.id}/online',
-            'state_topic': f'home/{device.id}/fan/state',  # fan ON/OFF
-            'command_topic': f'home/{device.id}/fan/command',
-            'percentage_state_topic': f'home/{device.id}/fan/speed/state',
-            'percentage_command_topic': f'home/{device.id}/fan/speed/command',
-            'device': {
-                'identifiers': [device.id, device.mac],
-                'name': device.name,
-                'manufacturer': 'Fanco',
-                'model': 'Infinity iD DC',
-                'sw_version': f'tinytuya {tinytuya.version}',
-            }
-        }
-        publish.single(
-            f'homeassistant/fan/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True, auth={'username':MQTT_USERNAME, 'password':MQTT_PASSWORD}
-        )
-
-    if device.dps.get('climate_state'):
-        data = {
-            'name': device.name,
-            'unique_id': device.id,
-            'availability_topic': f'home/{device.id}/online',
-            'mode_state_topic': f'home/{device.id}/climate/mode/state',
-            'mode_command_topic': f'home/{device.id}/climate/mode/command',
-            'action_topic': f'home/{device.id}/climate/action',
-            'current_temperature_topic': f'home/{device.id}/climate/current_temperature',
-            'temperature_state_topic': f'home/{device.id}/climate/temperature/state',
-            'temperature_command_topic': f'home/{device.id}/climate/temperature/command',
-            'temp_step': 0.1,
-            'modes': ['off','heat'],
-            'device': {
-                'identifiers': [device.id, device.mac],
-                'name': device.name,
-                'model': 'Thermostat',
-                'sw_version': f'tinytuya {tinytuya.version}',
-            }
-        }
-        publish.single(
-            f'homeassistant/climate/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True, auth={'username':MQTT_USERNAME, 'password':MQTT_PASSWORD}
-        )
-
-    # Publish fan light discovery topic, if the fan has a light
-    if device.dps.get('light_state'):
-        data = {
-            'name': f'{device.name} Light',
-            'unique_id': device.id,#f'{device.id}_light',
-            'availability_topic': f'home/{device.id}/online',
-            'state_topic': f'home/{device.id}/light/state',  # light ON/OFF
-            'command_topic': f'home/{device.id}/light/command',
-            'brightness_scale': 100,
-            'brightness_state_topic': f'home/{device.id}/light/brightness/state',
-            'brightness_command_topic': f'home/{device.id}/light/brightness/command',
-            'device': {
-                'identifiers': [device.id, device.mac],
-                'name': device.name,
-                'manufacturer': 'Fanco',
-                'model': 'Infinity iD DC',
-                'sw_version': f'tinytuya {tinytuya.version}',
-            }
-        }
-        publish.single(
-            f'homeassistant/light/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True, auth={'username':MQTT_USERNAME, 'password':MQTT_PASSWORD}
-        )
+    for config in device.ha_config():
+        publish.single(config['topic'], json.dumps(config['config']), hostname=MQTT_BROKER, retain=True, auth={'username':MQTT_USERNAME, 'password':MQTT_PASSWORD})
 
     logger.info('Autodiscovery topic published for %s at %s', device.name, device.id)
 
 
 def read_config() -> List[Device]:
     '''
-    Read & parse tinytuya2mqtt.ini and snapshot.json
+    Read & parse tinytuya2mqtt.ini
     '''
     # Validate files are present
-    snapshot_conf_path = tinytuya2mqtt_conf_path = None
-
-    for fn in ('snapshot.json', '/snapshot.json'):
-        if os.path.exists(fn):
-            snapshot_conf_path = fn
-            break
-
-    if snapshot_conf_path is None:
-        logger.error('Missing snapshot.json')
-        sys.exit(2)
+    tinytuya2mqtt_conf_path = None
 
     for fn in ('tinytuya2mqtt.ini', '/tinytuya2mqtt.ini'):
         if os.path.exists(fn):
@@ -146,19 +323,7 @@ def read_config() -> List[Device]:
         logger.error('Missing tinytuya2mqtt.ini')
         sys.exit(2)
 
-    try:
-        # Read snapshop.json
-        with open(snapshot_conf_path, encoding='utf8') as f:
-            snapshot = json.load(f)
-    except json.decoder.JSONDecodeError:
-        logger.error('Invalid snapshot.json!')
-        sys.exit(3)
-
-    # Create a dict of Device objects from snapshot.json
-    devices = {
-        d['id']: Device(d['name'], d['id'], d['key'], d['mac'], d['ip'])
-        for d in snapshot['devices']
-    }
+    devices = {}
 
     # Read tinytuya2mqtt.ini
     cfg = configparser.ConfigParser(inline_comment_prefixes='#')
@@ -173,7 +338,13 @@ def read_config() -> List[Device]:
 
             if parts[0] == 'device':
                 device_id = parts[1]
-                devices[device_id].dps = dict(cfg.items(section))
+                type = dict(cfg.items(section))['type']
+                if type == 'climate':
+                    devices[device_id] = ClimateDevice(device_id, dict(cfg.items(section)))
+                if type == 'fan':
+                    devices[device_id] = FanDevice(device_id, dict(cfg.items(section)))
+                if type == 'fanwlight':
+                    devices[device_id] = FanWithLightDevice(device_id, dict(cfg.items(section)))
 
             elif parts[0] == 'broker':
                 global MQTT_BROKER,MQTT_USERNAME,MQTT_PASSWORD  # pylint: disable=global-statement
@@ -207,8 +378,7 @@ def on_connect(client, userdata, _1, _2):
     '''
     On broker connected, subscribe to the command topics
     '''
-    for cmd in ('fan', 'fan/speed', 'light', 'light/brightness', 'climate/temperature', 'climate/mode'):
-        command_topic = f"home/{userdata['device'].id}/{cmd}/command"
+    for command_topic in userdata['device'].get_topics():
         client.subscribe(command_topic, 0)
         logger.info('Subscribed to %s', command_topic)
 
@@ -228,55 +398,7 @@ def on_message(_, userdata: dict, msg: bytes):
 
     device: Device = userdata['device']
 
-    # Fan on/off
-    if msg.topic.endswith('/fan/command'):
-        dps = device.dps['fan_state']
-        val = bool(msg.payload == b'ON')
-
-        logger.debug('Setting %s to %s', dps, val)
-        device.tuya.set_status(val, switch=dps)
-
-    # Fan speed
-    elif msg.topic.endswith('/fan/speed/command'):
-        dps = device.dps['fan_speed']
-        val = pct_to_speed(int(msg.payload), device.dps['fan_speed_steps'][-1])
-
-        logger.debug('Setting %s to %s', dps, val)
-        device.tuya.set_value(dps, val)
-
-    # Light on/off
-    elif msg.topic.endswith('/light/command'):
-        dps = device.dps['light_state']
-        val = bool(msg.payload == b'ON')
-
-        logger.debug('Setting %s to %s', dps, val)
-        device.tuya.set_status(val, switch=dps)
-
-    # Light brightness
-    elif msg.topic.endswith('/light/brightness/command'):
-        dps = device.dps['light_brightness']
-        val = pct_to_speed(int(msg.payload), device.dps['light_brightness_steps'][-1])
-
-        logger.debug('Setting %s to %s', dps, val)
-        device.tuya.set_value(dps, val)
-
-    # Climate temp
-    elif msg.topic.endswith('/climate/temperature/command'):
-        dps = device.dps['set_temperature']
-        val = int(float(msg.payload)*10)
-
-        logger.debug('Setting %s to %s', dps, val)
-        device.tuya.set_value(dps, val)
-
-    # Climate mode
-    elif msg.topic.endswith('/climate/mode/command'):
-        dps = device.dps['climate_state']
-        val = bool(msg.payload == b'heat')
-
-        logger.debug('Setting %s to %s', dps, val)
-        device.tuya.set_value(dps, val)
-
-    status = { dps: val }
+    status = device.handle_msg(msg)
     # Immediately publish status back to HA
     read_and_publish_status(userdata['device'], status)
 
@@ -286,14 +408,11 @@ def poll(device: Device):
     Start MQTT threads, and then poll a device for status updates.
 
     Params:
-        device:  An instance of Device dataclass
+        device:  An instance of Device
     '''
     logger.debug('Connecting to %s', device.ip)
 
-    device.tuya = tinytuya.OutletDevice(device.id, device.ip, device.key)
-    device.tuya.set_version(3.3)
-    device.tuya.set_socketPersistent(True)
-    device.tuya.set_socketTimeout(TIME_SLEEP)
+    device.connect()
 
     # Connect to the broker and hookup the MQTT message event handler
     client = mqtt.Client(device.id, userdata={'device': device})
@@ -304,15 +423,11 @@ def poll(device: Device):
     client.connect(MQTT_BROKER)
     client.loop_start()
 
-    status = device.tuya.status().get('dps')
-    read_and_publish_status(device, status)
-    hbtime = time.time() + 20
+    read_and_publish_status(device, device.poll_status())
 
     try:
         while True:
-            if( hbtime <= time.time() ):
-                device.tuya.send(device.tuya.generate_payload(tinytuya.HEART_BEAT))
-                hbtime = time.time() + 20
+            device.send_heartbeat()
             data = device.tuya.receive()
             if data:
                 read_and_publish_status(device, data.get('dps'))
@@ -326,7 +441,7 @@ def read_and_publish_status(device: Device, status: dict):
     Fetch device current status and publish on MQTT
 
     Params:
-        device:  An instance of Device dataclass
+        device:  An instance of Device
     '''
     logger.debug('STATUS:  %s', status)
     if not status:
@@ -340,75 +455,8 @@ def read_and_publish_status(device: Device, status: dict):
         (f'home/{device.id}/online', 'online')
     ]
 
-    # Publish fan state
-    if device.dps.get('fan_state') in status:
-        msgs.append(
-            (f'home/{device.id}/fan/state', 'ON' if status[device.dps['fan_state']] else 'OFF')
-        )
-
-    # Publish climate state
-    if int(device.dps.get('climate_state')) in status:
-        msgs.append(
-            (f'home/{device.id}/climate/mode/state', 'heat' if status[int(device.dps['climate_state'])] else 'off')
-        )
-
-    # Publish climate state
-    if int(device.dps.get('action')) in status:
-        msgs.append(
-            (f'home/{device.id}/climate/action', 'heating' if int(status[int(device.dps['action'])]) else 'off')
-        )
-
-    # Publish light state
-    if device.dps.get('light_state') in status:
-        msgs.append(
-            (f'home/{device.id}/light/state', 'ON' if status[device.dps['light_state']] else 'OFF')
-        )
-
-    # Publish fan speed
-    if device.dps.get('fan_speed') in status:
-        msgs.append(
-            (
-                f'home/{device.id}/fan/speed/state',
-                speed_to_pct(
-                    status[device.dps['fan_speed']],
-                    device.dps['fan_speed_steps'][-1],
-                ),
-            )
-        )
-
-    # Publish current temperature
-    if int(device.dps.get('current_temperature')) in status:
-        msgs.append(
-            (f'home/{device.id}/climate/current_temperature', status[int(device.dps['current_temperature'])]/10)
-        )
-
-    # Publish set temperature
-    if int(device.dps.get('set_temperature')) in status:
-        msgs.append(
-            (f'home/{device.id}/climate/temperature/state', status[int(device.dps['set_temperature'])]/10)
-        )
-
-    # Publish light brightness
-    if device.dps.get('light_brightness') in status:
-        msgs.append(
-            (
-                f'home/{device.id}/light/brightness/state',
-                speed_to_pct(
-                    status[device.dps['light_brightness']],
-                    device.dps['light_brightness_steps'][-1],
-                ),
-            )
-        )
+    for msg in device.parse_status(status):
+        msgs.append(msg)
 
     logger.debug('PUBLISH: %s', msgs)
     publish.multiple(msgs, hostname=MQTT_BROKER, auth={'username':MQTT_USERNAME, 'password':MQTT_PASSWORD})
-
-
-def speed_to_pct(raw: int, max_: int) -> int:
-    'Convert a raw value to a percentage'
-    return round(raw / max_ * 100)
-
-
-def pct_to_speed(percentage: int, max_: int) -> int:
-    'Convert a percentage to a raw value'
-    return round(percentage / 100 * max_)
