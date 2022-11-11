@@ -26,6 +26,8 @@ if os.environ.get('TINYTUYA_DEBUG'):
 
 
 MQTT_BROKER = None
+MQTT_USERNAME = None
+MQTT_PASSWORD = None
 TIME_SLEEP = 5
 
 
@@ -66,7 +68,7 @@ def autoconfigure_ha(device: Device):
             }
         }
         publish.single(
-            f'homeassistant/fan/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True,
+            f'homeassistant/fan/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True, auth={'username':MQTT_USERNAME, 'password':MQTT_PASSWORD}
         )
 
     if device.dps.get('climate_state'):
@@ -90,7 +92,7 @@ def autoconfigure_ha(device: Device):
             }
         }
         publish.single(
-            f'homeassistant/climate/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True,
+            f'homeassistant/climate/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True, auth={'username':MQTT_USERNAME, 'password':MQTT_PASSWORD}
         )
 
     # Publish fan light discovery topic, if the fan has a light
@@ -113,7 +115,7 @@ def autoconfigure_ha(device: Device):
             }
         }
         publish.single(
-            f'homeassistant/light/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True,
+            f'homeassistant/light/{device.id}/config', json.dumps(data), hostname=MQTT_BROKER, retain=True, auth={'username':MQTT_USERNAME, 'password':MQTT_PASSWORD}
         )
 
     logger.info('Autodiscovery topic published for %s at %s', device.name, device.id)
@@ -174,8 +176,10 @@ def read_config() -> List[Device]:
                 devices[device_id].dps = dict(cfg.items(section))
 
             elif parts[0] == 'broker':
-                global MQTT_BROKER  # pylint: disable=global-statement
+                global MQTT_BROKER,MQTT_USERNAME,MQTT_PASSWORD  # pylint: disable=global-statement
                 MQTT_BROKER = dict(cfg.items(section))['hostname']
+                MQTT_USERNAME = dict(cfg.items(section))['username']
+                MQTT_PASSWORD = dict(cfg.items(section))['password']
 
     except KeyError:
         logger.error('Malformed broker section in tinytuya2mqtt.ini')
@@ -293,6 +297,8 @@ def poll(device: Device):
     client = mqtt.Client(device.id, userdata={'device': device})
     client.on_connect = on_connect
     client.on_message = on_message
+    if MQTT_USERNAME and MQTT_PASSWORD:
+        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     client.connect(MQTT_BROKER)
     client.loop_start()
 
@@ -386,7 +392,7 @@ def read_and_publish_status(device: Device):
         )
 
     logger.debug('PUBLISH: %s', msgs)
-    publish.multiple(msgs, hostname=MQTT_BROKER)
+    publish.multiple(msgs, hostname=MQTT_BROKER, auth={'username':MQTT_USERNAME, 'password':MQTT_PASSWORD})
 
 
 def speed_to_pct(raw: int, max_: int) -> int:
