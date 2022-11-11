@@ -276,8 +276,9 @@ def on_message(_, userdata: dict, msg: bytes):
         logger.debug('Setting %s to %s', dps, val)
         device.tuya.set_value(dps, val)
 
+    status = { dps: val }
     # Immediately publish status back to HA
-    read_and_publish_status(userdata['device'])
+    read_and_publish_status(userdata['device'], status)
 
 
 def poll(device: Device):
@@ -292,6 +293,7 @@ def poll(device: Device):
     device.tuya = tinytuya.OutletDevice(device.id, device.ip, device.key)
     device.tuya.set_version(3.3)
     device.tuya.set_socketPersistent(True)
+    device.tuya.set_socketTimeout(TIME_SLEEP)
 
     # Connect to the broker and hookup the MQTT message event handler
     client = mqtt.Client(device.id, userdata={'device': device})
@@ -302,23 +304,30 @@ def poll(device: Device):
     client.connect(MQTT_BROKER)
     client.loop_start()
 
+    status = device.tuya.status().get('dps')
+    read_and_publish_status(device, status)
+    hbtime = time.time() + 20
+
     try:
         while True:
-            read_and_publish_status(device)
-            time.sleep(TIME_SLEEP)
+            if( hbtime <= time.time() ):
+                device.tuya.send(device.tuya.generate_payload(tinytuya.HEART_BEAT))
+                hbtime = time.time() + 20
+            data = device.tuya.receive()
+            if data:
+                read_and_publish_status(device, data.get('dps'))
     finally:
         client.loop_stop()
         logger.info('fin')
 
 
-def read_and_publish_status(device: Device):
+def read_and_publish_status(device: Device, status: dict):
     '''
     Fetch device current status and publish on MQTT
 
     Params:
         device:  An instance of Device dataclass
     '''
-    status = device.tuya.status().get('dps')
     logger.debug('STATUS:  %s', status)
     if not status:
         logger.error('Failed getting device status %s', device.id)
