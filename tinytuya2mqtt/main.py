@@ -41,6 +41,8 @@ class Device:
     model: str
     hb_interval: int
     hb_time: int
+    status_interval: int
+    status_time: int
     tuya: tinytuya.OutletDevice = dataclasses.field(default=None)
 
     def __init__(self, id, config):
@@ -51,6 +53,8 @@ class Device:
         self.ip = config['ip']
         self.hb_interval = 20
         self.hb_time = time.time() + self.hb_interval
+        self.status_interval = 300
+        self.status_time = time.time() + self.status_interval
 
     def connect(self):
         self.tuya = tinytuya.OutletDevice(self.id, self.ip, self.key)
@@ -59,11 +63,18 @@ class Device:
         self.tuya.set_socketTimeout(TIME_SLEEP)
 
     def send_heartbeat(self):
-        if self.hb_time <= time.time():
+        curtime = time.time()
+        if self.status_time <= curtime:
+            payload = self.tuya.generate_payload(tinytuya.DP_QUERY)
+            logger.debug('Send status query to %s (%s)', self.name, self.id)
+            self.tuya.send(payload)
+            self.status_time = curtime + self.status_interval
+            self.hb_time = curtime + self.hb_interval
+        elif self.hb_time <= curtime:
             payload = self.tuya.generate_payload(tinytuya.HEART_BEAT)
             logger.debug('Send heartbeat to %s (%s)', self.name, self.id)
             self.tuya.send(payload)
-            self.hb_time = time.time() + self.hb_interval
+            self.hb_time = curtime + self.hb_interval
 
     def poll_status(self):
         return self.tuya.status().get('dps')
