@@ -51,10 +51,9 @@ pip install -e .
 Config
 ----------
 
-Two things are required:
+Config file is required:
 
- 1. `snapshot.json`
- 2. `tinytuya2mqtt.ini`
+ 1. `tinytuya2mqtt.ini`
 
 #### snapshot.json
 
@@ -75,33 +74,27 @@ ensure to include your MQTT broker hostname. For example:
 ```ini
 [broker]
 hostname = 192.168.1.198
+username = user
+password = password
 
 [device bf7bf4939779bbd9afllck]
-fan_state = 1
-fan_speed = 3
-fan_speed_steps = 1,2,3,4,5,6
-light_state = 15
-light_brightness = 16
-light_brightness_steps = 25,125,275,425,575,725,900,1000
-light_temp = 17
+type = fan
+name = Fan
+ip = 192.168.1.10
+key = xxxxxxxxxxxxxxx
+mac = 00:11:22:33:44:55
 
 [device bf66790922f582082fao6p]
-fan_state = 1
-fan_speed = 3
-fan_speed_steps = 1,2,3,4,5,6
+type = fanwlight
+name = "Fan with light"
+ip = 192.168.1.11
+key = xxxxxxxxxxxxxxx
+mac = 00:11:22:33:44:55
+
+[device bf66790922f582082fef61]
+type = climate
+name = Thermostat
+ip = 192.168.1.12
+key = xxxxxxxxxxxxxxx
+mac = 00:11:22:33:44:55
 ```
-
-Devices
-----------
-
-Device types and capabilities supported by `tinytuya2mqtt`:
-
-|Type|Subtype|Name|Example|
-|---|---|---|---|
-|Fan|Fan|`fan_state`|`1`|
-|Fan|Fan|`fan_speed`|`3`|
-|Fan|Fan|`fan_speed_steps`|`1,2,3,4,5,6`|
-|Fan|Light|`light_state`|`15`|
-|Fan|Light|`light_brightness`|`16`|
-|Fan|Light|`light_brightness_steps`|`25,125,275,425,575,725,900,1000`|
-|Fan|Light|`light_temp`|`17`|
