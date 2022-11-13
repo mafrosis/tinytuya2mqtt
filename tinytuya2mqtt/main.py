@@ -138,7 +138,7 @@ class FanDevice(Device):
             val = bool(msg.payload == b'ON')
 
             logger.debug('Setting %s to %s', dps, val)
-            self.tuya.set_status(val, switch=dps)
+            self.tuya.set_value(dps, val, True)
 
         # Fan speed
         elif msg.topic.endswith('/fan/speed/command'):
@@ -146,7 +146,7 @@ class FanDevice(Device):
             val = self.pct_to_speed(int(msg.payload), self.fan_speed_steps[-1])
 
             logger.debug('Setting %s to %s', dps, val)
-            self.tuya.set_value(dps, val)
+            self.tuya.set_value(dps, val, True)
 
         return { dps: val }
 
@@ -205,7 +205,7 @@ class FanWithLightDevice(FanDevice):
             val = bool(msg.payload == b'ON')
 
             logger.debug('Setting %s to %s', dps, val)
-            self.tuya.set_status(val, switch=dps)
+            self.tuya.set_value(dps, val, True)
 
         # Light brightness
         elif msg.topic.endswith('/light/brightness/command'):
@@ -213,7 +213,7 @@ class FanWithLightDevice(FanDevice):
             val = self.pct_to_speed(int(msg.payload), self.light_brightness_steps[-1])
 
             logger.debug('Setting %s to %s', dps, val)
-            self.tuya.set_value(dps, val)
+            self.tuya.set_value(dps, val, True)
         else:
             return super().handle_command(msg)
 
@@ -278,7 +278,7 @@ class ClimateDevice(Device):
             val = int(float(msg.payload)*10)
 
             logger.debug('Setting %s to %s', dps, val)
-            self.tuya.set_value(dps, val)
+            self.tuya.set_value(dps, val, True)
 
         # Climate mode
         elif msg.topic.endswith('/climate/mode/command'):
@@ -286,7 +286,7 @@ class ClimateDevice(Device):
             val = bool(msg.payload == b'heat')
 
             logger.debug('Setting %s to %s', dps, val)
-            self.tuya.set_value(dps, val)
+            self.tuya.set_value(dps, val, True)
 
         return { dps: val }
 
